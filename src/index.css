@@ -1,0 +1,11 @@
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{margin:0;overflow:hidden;-webkit-tap-highlight-color:transparent;
+  font-family:"Manrope",system-ui,sans-serif;color:#f3ead5;
+  display:flex;justify-content:center;align-items:stretch;
+  background:
+    radial-gradient(900px 600px at 18% 8%, rgba(217,180,91,.12), transparent 60%),
+    radial-gradient(800px 700px at 88% 96%, rgba(20,120,90,.3), transparent 55%),
+    linear-gradient(160deg,#04140f,#072a20 60%,#04140f);}
+button{font-family:inherit}
+input{font-family:inherit}

@@ -1,0 +1,15 @@
+{
+  "name": "NoorShorts — Islamic Reels, Recitation & Study",
+  "short_name": "NoorShorts",
+  "description": "Only Islamic reels, plus a lofi-style study companion with Quran recitation and ambient focus sounds.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#04140f",
+  "theme_color": "#06231a",
+  "categories": ["lifestyle", "education"],
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
