@@ -111,7 +111,7 @@ export function NoorProvider({ children }) {
   return <NoorCtx.Provider value={value}>{children}</NoorCtx.Provider>;
 }
 
-/* ---------- persistent audio (survives tab switches) + Media Session ---------- */
+/* ---------- persistent audio (survives tab switches) + MediaSession + background-resume ---------- */
 const AudioCtx = createContext(null);
 export const useAudio = () => useContext(AudioCtx);
 
@@ -185,16 +185,37 @@ export function AudioProvider({ children }) {
   }, [noor, playTrack]);
 
   const ambientActive = ambient.rain > 0.01 || ambient.pad > 0.01 || ambient.chimes > 0.01;
+
+  // MediaSession: OS ko batao ki yeh ek real media session hai → lock-screen controls + background mein zinda rahe
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
+    const ms = navigator.mediaSession;
     try {
-      if (track) navigator.mediaSession.metadata = new MediaMetadata({ title: track.t || "NoorShorts audio", artist: track.ch || "NoorShorts", album: "NoorShorts · Study" });
-      else if (ambientActive) navigator.mediaSession.metadata = new MediaMetadata({ title: "Focus Ambience", artist: "NoorShorts", album: "Study" });
-      else navigator.mediaSession.metadata = null;
-      navigator.mediaSession.setActionHandler("play", () => { if (track && player.current) player.current.playVideo(); });
-      navigator.mediaSession.setActionHandler("pause", () => { if (track && player.current) player.current.pauseVideo(); });
+      if (track) ms.metadata = new MediaMetadata({ title: track.t || "NoorShorts audio", artist: track.ch || "NoorShorts", album: "NoorShorts · Study" });
+      else if (ambientActive) ms.metadata = new MediaMetadata({ title: "Focus Ambience", artist: "NoorShorts", album: "Study" });
+      else ms.metadata = null;
+      ms.playbackState = playing || ambientActive ? "playing" : "paused";
+      const play = () => { if (track && player.current) player.current.playVideo(); engine.current && engine.current.resume(); };
+      const pause = () => { if (track && player.current) player.current.pauseVideo(); };
+      ms.setActionHandler("play", play);
+      ms.setActionHandler("pause", pause);
+      ms.setActionHandler("stop", pause);
+      ms.setActionHandler("seekbackward", (d) => { try { if (track && player.current) player.current.seekTo(Math.max(0, player.current.getCurrentTime() - (d || 10)), true); } catch {} });
+      ms.setActionHandler("seekforward", (d) => { try { if (track && player.current) player.current.seekTo(player.current.getCurrentTime() + (d || 10), true); } catch {} });
     } catch {}
   }, [track, playing, ambientActive]);
+
+  // App pe wapas aate hi audio ko phir se zinda karo (mobile hidden tab ko suspend kar deta hai)
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        engine.current && engine.current.resume();
+        if (track && playing) { try { player.current && player.current.playVideo(); } catch {} }
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [track, playing]);
 
   return (
     <AudioCtx.Provider value={{ track, playing, volume, ambient, ambientActive, playTrack, toggle, setVolume, setRain, setPad, setChimes, chime, playRecitation, playLecture, stopAll }}>
