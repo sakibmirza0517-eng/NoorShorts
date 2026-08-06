@@ -105,7 +105,7 @@ export function searchVideos(key, q) {
   })();
 }
 
-/* recitation / lecture : keyless first, cached 24h (so it survives quota & mirror hiccups) */
+/* recitation / lecture : keyless first, cached 24h (survives quota & mirror hiccups) */
 const AC = "noor_audio_cache_v1";
 export async function fetchAudioTrack(key, query) {
   let ac = {}; try { ac = JSON.parse(localStorage.getItem(AC) || "{}"); } catch {}
@@ -119,7 +119,7 @@ export async function fetchAudioTrack(key, query) {
   } catch { return fresh ? fresh.item : null; }
 }
 
-/* collection (Saved) */
+/* ---------- collection (Saved) ---------- */
 const CK = "noor_collection";
 export const getCollection = () => { try { return JSON.parse(localStorage.getItem(CK) || "[]"); } catch { return []; } };
 const saveCol = (a) => localStorage.setItem(CK, JSON.stringify(a));
@@ -128,10 +128,15 @@ export function toggleCollection(item) {
   const a = getCollection(); const i = a.findIndex((x) => x.id === item.id);
   if (i >= 0) { a.splice(i, 1); saveCol(a); return false; } a.unshift(item); saveCol(a); return true;
 }
+export function addToCollection(item) {
+  const a = getCollection();
+  if (a.some((x) => x.id === item.id)) return false;
+  a.unshift(item); saveCol(a); return true;
+}
 export const removeFromCollection = (id) => saveCol(getCollection().filter((x) => x.id !== id));
 export function likeCount(id) { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return (h % 9000) + 1200; }
 
-/* link parsing (import) */
+/* ---------- link parsing (import) ---------- */
 const IG_RE = /instagram\.com\/(reel|p|tv)\/([A-Za-z0-9_-]+)/;
 const YT_RE = /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/;
 export function parseLink(raw) {
@@ -140,7 +145,7 @@ export function parseLink(raw) {
   const yt = u.match(YT_RE); if (yt) return { source: "youtube", id: yt[1] }; return null;
 }
 
-/* taste engine (positive + negative) */
+/* ---------- taste engine (positive + negative) ---------- */
 const TK = "noor_taste";
 const STOP = new Set(("the and for with you this that from your about will have not but just like one all can how why when what who its our their them than then also very been were was is are am be by at in on to of a an it so do no if or as we he she my me i don't it's that's there here beautiful amazing best top new full hd viral must watch short shorts video youtube channel part episode recitation quran islamic muslim").split(/\s+/));
 export const getTaste = () => { try { return JSON.parse(localStorage.getItem(TK) || "{}"); } catch { return {}; } };
@@ -160,7 +165,7 @@ export const removeTasteKeyword = (k) => { const m = getTaste(); delete m[k]; sa
 export const topTasteKeywords = (n) => Object.entries(getTaste()).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, w]) => ({ k, w }));
 export const buildTasteQuery = () => { const t = topTasteKeywords(2).map((x) => x.k); return t.length ? t.join(" ") + " islamic" : null; }
 
-/* hidden / disliked reels */
+/* ---------- hidden / disliked reels ---------- */
 const HK = "noor_hidden";
 export const getHidden = () => { try { return JSON.parse(localStorage.getItem(HK) || "[]"); } catch { return []; } };
 const saveHidden = (a) => localStorage.setItem(HK, JSON.stringify(a));
@@ -173,7 +178,7 @@ export function hideReel(item) {
 export const unhideReel = (id) => saveHidden(getHidden().filter((x) => x.id !== id));
 export const unhideAll = () => saveHidden([]);
 
-/* creators */
+/* ---------- creators ---------- */
 export const CURATED_CREATORS = ["Mufti Menk", "Nouman Ali Khan", "Omar Suleiman", "Mishary Rashid Alafasy", "Assim Al Hakeem", "Yaqeen Institute", "One Path", "MercifulServant", "Daily Reminder", "Maher Al Muaiqly"];
 const CRK = "noor_creators";
 export const getCustomCreators = () => { try { return JSON.parse(localStorage.getItem(CRK) || "[]"); } catch { return []; } };
@@ -185,7 +190,7 @@ export function addCustomCreator(name) {
 }
 export const removeCustomCreator = (name) => saveCus(getCustomCreators().filter((c) => c !== name));
 
-/* offline ambient engine: generated rain + calm drone + soft chimes (no network, no copyright, no quota) */
+/* ---------- offline ambient engine: rain + calm drone + soft chimes (no network, no quota) ---------- */
 export class AmbientEngine {
   constructor() { this.ctx = null; this.chimeLevel = 0; this.chimeTimer = null; }
   ensure() {
