@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { CSS } from "./styles";
-import { NoorProvider, AudioProvider, useNoor } from "./store";
+import { NoorProvider, AudioProvider, useNoor, useBackClose } from "./store";
 import {
   ReelsScreen, StudyScreen, MeScreen, TopBar, BottomNav, NowPlaying,
   ImportSheet, ConnectDrawer, ReelScroller, EXTRA_CSS,
@@ -14,6 +14,7 @@ function Motes() {
 function SavedTab() {
   const noor = useNoor();
   const [play, setPlay] = useState(null);
+  useBackClose(play !== null, () => setPlay(null));
   return (
     <div className="scr-pad">
       <div style={{ fontFamily: "Amiri,serif", fontSize: "1.5rem", marginBottom: 4 }}>Saved <span style={{ color: "#d9b45b" }}>المفضّلة</span></div>

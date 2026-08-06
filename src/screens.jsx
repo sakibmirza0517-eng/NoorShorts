@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
-  loadYT, searchVideos, QUERIES, buildTasteQuery, inCollection, toggleCollection, likeCount, parseLink, isHidden,
-  isQuota, isAllDown, getCachedItems, cacheItems, persistFeed, getPersistedFeed,
+  loadYT, searchVideos, QUERIES, buildTasteQuery, inCollection, toggleCollection, addToCollection, likeCount,
+  parseLink, isHidden, isQuota, isAllDown, getCachedItems, cacheItems, persistFeed, getPersistedFeed,
 } from "./lib";
-import { useNoor, useAudio } from "./store";
+import { useNoor, useAudio, useBackClose } from "./store";
 
 const FEED_TTL = 3 * 3600 * 1000;
 
@@ -35,7 +35,6 @@ export const EXTRA_CSS = `
 .tm-h{font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:#d9b45b;margin:20px 0 9px;display:flex;justify-content:space-between;align-items:center}
 .tm-h button{font-size:.64rem;letter-spacing:.04em;text-transform:none;font-weight:700;color:#e7cd86;background:rgba(217,180,91,.12);border:1px solid rgba(217,180,91,.25);border-radius:999px;padding:5px 11px;cursor:pointer}
 .tm-h button:hover{background:rgba(217,180,91,.2)}
-
 .afloat{position:absolute;top:96px;right:12px;z-index:18;display:flex;align-items:center;gap:6px;padding:6px 7px 6px 10px;
   border-radius:999px;background:rgba(8,38,28,.74);border:1px solid rgba(217,180,91,.32);backdrop-filter:blur(8px);
   box-shadow:0 12px 26px -12px #000;animation:chipin .4s cubic-bezier(.34,1.56,.64,1)}
@@ -52,8 +51,6 @@ export const EXTRA_CSS = `
 .np-ctl .stop:hover{background:rgba(255,84,112,.16);color:#ff8aa0}
 .np-ctl .stop svg{width:17px;height:17px}
 .tbtn.on-sound{color:#e7cd86;border-color:rgba(217,180,91,.55);box-shadow:0 0 0 1px rgba(217,180,91,.25)}
-
-/* source pill — shows which engine is serving the feed (the trick, made visible) */
 .src-pill{position:absolute;top:100px;left:12px;z-index:18;display:inline-flex;align-items:center;gap:6px;font-size:.6rem;
   letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:#e7cd86;background:rgba(8,38,28,.72);
   border:1px solid rgba(217,180,91,.3);padding:5px 10px;border-radius:999px;backdrop-filter:blur(6px);animation:chipin .4s ease}
@@ -61,7 +58,6 @@ export const EXTRA_CSS = `
 @keyframes pulseA{0%{box-shadow:0 0 0 0 rgba(202,162,74,.5)}70%{box-shadow:0 0 0 7px rgba(202,162,74,0)}100%{box-shadow:0 0 0 0 rgba(202,162,74,0)}}
 .src-pill.live{color:#bff0d2;border-color:rgba(120,220,160,.4)}
 .src-pill.live .d{background:#5fe08a;animation:pulseB 1.8s infinite}
-
 @keyframes beat{0%,100%{transform:scale(.9);opacity:.6}50%{transform:scale(1.1);opacity:1}}
 @keyframes glow{0%,100%{text-shadow:0 0 18px rgba(217,180,91,.2)}50%{text-shadow:0 0 32px rgba(217,180,91,.45)}}
 .qr{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;overflow:auto;
@@ -88,6 +84,18 @@ export const EXTRA_CSS = `
 .endcard h3{font-family:"Amiri",serif;font-size:1.3rem;margin:10px 0 6px}
 .endcard p{color:#b9c6b6;font-size:.82rem;line-height:1.6;max-width:300px;margin:0 auto}
 .endcard .clk{font-variant-numeric:tabular-nums;color:#e7cd86;font-weight:800}
+.ig-toggle{position:absolute;top:140px;right:12px;z-index:18;width:40px;height:40px;border-radius:50%;
+  border:1px solid rgba(217,180,91,.32);background:rgba(8,38,28,.74);backdrop-filter:blur(8px);cursor:pointer;
+  font-size:1.05rem;display:grid;place-items:center;box-shadow:0 12px 26px -12px #000;transition:.2s;animation:chipin .4s ease}
+.ig-toggle:hover{transform:scale(1.08);border-color:#d9b45b}
+.ig-card{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);width:min(86%,410px);height:72%;
+  border-radius:22px;overflow:hidden;background:#0b0b0b;border:1px solid rgba(217,180,91,.28);
+  box-shadow:0 40px 80px -40px #000,0 0 0 6px rgba(255,255,255,.03)}
+.ig-empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px}
+.ig-empty .ig-logo{font-size:3rem;filter:drop-shadow(0 8px 20px rgba(217,180,91,.3));animation:beat 3s ease-in-out infinite}
+.ig-empty h3{font-family:"Amiri",serif;font-size:1.5rem;margin:10px 0 8px}
+.ig-empty p{color:#b9c6b6;font-size:.85rem;line-height:1.6;max-width:330px;margin:0 auto 18px}
+.ig-empty p b{color:#e7cd86}
 `;
 
 const I = {
@@ -132,7 +140,7 @@ function usePTCountdown() {
   return ms;
 }
 
-function Reel({ item, index, active, mounted, muted, onAfter, onDislike, onSkip }) {
+function Reel({ item, index, active, mounted, muted, low, onAfter, onDislike, onSkip, total }) {
   const divRef = useRef(null); const pRef = useRef(null); const ready = useRef(false);
   const [saved, setSaved] = useState(() => inCollection(item.id));
   const [pop, setPop] = useState(false);
@@ -150,10 +158,11 @@ function Reel({ item, index, active, mounted, muted, onAfter, onDislike, onSkip 
           onReady: (e) => {
             pRef.current = e.target; ready.current = true;
             if (muted) e.target.mute(); else { e.target.unMute(); e.target.setVolume(100); }
+            if (low) { try { e.target.setPlaybackQuality && e.target.setPlaybackQuality("small"); } catch {} }
             if (active) { e.target.seekTo(0, true); e.target.playVideo(); } else e.target.pauseVideo();
           },
           onStateChange: (e) => { if (e.data === window.YT.PlayerState.ENDED) e.target.playVideo(); },
-          onError: () => { setTimeout(() => onSkip && onSkip(index), 500); }, // self-heal: dead/unembeddable → jump next
+          onError: () => { setTimeout(() => onSkip && onSkip(index), 500); },
         },
       }); pRef.current = p;
     });
@@ -172,12 +181,13 @@ function Reel({ item, index, active, mounted, muted, onAfter, onDislike, onSkip 
   return (
     <section className={"reel" + (leaving ? " leaving" : "")} data-i={index}>
       <div className="reel-media">
-        {isIG ? <div style={{ position: "absolute", inset: 0 }}><iframe title={"ig-" + item.code} src={"https://www.instagram.com/" + item.type + "/" + item.code + "/embed/"} allow="autoplay; encrypted-media" allowFullScreen style={{ width: "100%", height: "100%", border: 0, background: "#000" }} /></div>
-          : mounted ? <div className="yt" ref={divRef} />
+        {isIG ? (
+          <div className="ig-card"><iframe title={"ig-" + item.code} src={"https://www.instagram.com/" + item.type + "/" + item.code + "/embed/"} allow="autoplay; encrypted-media" allowFullScreen style={{ width: "100%", height: "100%", border: 0, background: "#0b0b0b" }} /></div>
+        ) : mounted ? <div className="yt" ref={divRef} />
           : <div className="poster" style={item.thumb ? { backgroundImage: `url(${item.thumb})` } : undefined}>{!item.thumb && <span className="poster-emoji">🌙</span>}</div>}
         <div className="scrim-top" /><div className="scrim-bot" />
       </div>
-      <div className="reel-idx">{index + 1} / ∞</div>
+      <div className="reel-idx">{index + 1} / {total ?? "∞"}</div>
       <div className="rail">
         <div className="rail-av">{(item.ch || "?").charAt(0).toUpperCase()}</div>
         <button className={"rail-btn" + (saved ? " liked" : "")} onClick={onHeart} aria-label="save">
@@ -191,11 +201,19 @@ function Reel({ item, index, active, mounted, muted, onAfter, onDislike, onSkip 
         )}
         {index === 0 && <div className="scroll-hint"><span /><small>scroll</small></div>}
       </div>
-      <div className="caption">
-        <div className="cap-ch">@{item.ch}</div>
-        <div className="cap-title">{item.t}</div>
-        <div className="cap-tag">#{word} · #NoorShorts</div>
-      </div>
+      {isIG ? (
+        <div className="caption">
+          <div className="cap-ch">Instagram</div>
+          <div className="cap-title">Reel · {item.code}</div>
+          <div className="cap-tag">#NoorShorts</div>
+        </div>
+      ) : (
+        <div className="caption">
+          <div className="cap-ch">@{item.ch}</div>
+          <div className="cap-title">{item.t}</div>
+          <div className="cap-tag">#{word} · #NoorShorts</div>
+        </div>
+      )}
     </section>
   );
 }
@@ -204,7 +222,15 @@ export function ReelScroller({ list, onAfter, startIndex = 0, onClose }) {
   const noor = useNoor();
   const [idx, setIdx] = useState(startIndex);
   const root = useRef(null);
-  useEffect(() => { setIdx(startIndex); if (root.current) root.current.scrollTop = 0; }, [startIndex, list]);
+  useEffect(() => {
+    setIdx(startIndex);
+    const t = setTimeout(() => {
+      if (!root.current) return;
+      if (startIndex > 0) { const el = root.current.querySelector('.reel[data-i="' + startIndex + '"]'); el && el.scrollIntoView({ block: "start" }); }
+      else root.current.scrollTop = 0;
+    }, 60);
+    return () => clearTimeout(t);
+  }, [startIndex, list]);
   useEffect(() => {
     const r = root.current; if (!r) return;
     const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { const i = parseInt(e.target.getAttribute("data-i"), 10); if (!isNaN(i)) setIdx(i); } }), { root: r, threshold: 0.6 });
@@ -214,7 +240,7 @@ export function ReelScroller({ list, onAfter, startIndex = 0, onClose }) {
   return (
     <div className="scroller" ref={root}>
       {onClose && <button className="back-btn" onClick={onClose} aria-label="back">{I.back}</button>}
-      {list.map((it, i) => <Reel key={it.id} item={it} index={i} active={i === idx} mounted={Math.abs(i - idx) <= 1} muted={noor.reelMuted} onAfter={onAfter} onSkip={skip} />)}
+      {list.map((it, i) => <Reel key={it.id} item={it} index={i} active={i === idx} mounted={Math.abs(i - idx) <= 1} muted={noor.reelMuted} low={noor.dataSaver} onAfter={onAfter} onSkip={skip} total={list.length} />)}
     </div>
   );
 }
@@ -232,10 +258,7 @@ function QuotaRest({ onRetry }) {
   return (
     <div className="qr">
       <div>
-        <div className="qr-moon">
-          <div className="glow" />
-          <svg viewBox="0 0 120 120"><path d="M74 22a40 40 0 1 0 0 76 31 31 0 0 1 0-76z" fill="#d9b45b" /><path d="M86 34l5 12 13 1.4-9.8 8.4 3 12.6-11.2-7-11.2 7 3-12.6-9.8-8.4 13-1.4z" fill="#e7cd86" /></svg>
-        </div>
+        <div className="qr-moon"><div className="glow" /><svg viewBox="0 0 120 120"><path d="M74 22a40 40 0 1 0 0 76 31 31 0 0 1 0-76z" fill="#d9b45b" /><path d="M86 34l5 12 13 1.4-9.8 8.4 3 12.6-11.2-7-11.2 7 3-12.6-9.8-8.4 13-1.4z" fill="#e7cd86" /></svg></div>
         <div className="qr-ar">صبر</div>
         <h2>Sab mirrors ek pal thak gaye</h2>
         <p>Humne keyless mirrors (Piped / Invidious) try kiye, cache dekha, aur YouTube API bhi — abhi sab rest pe hain ya tera network unhe rok raha hai. <b>Koi kharabi nahi.</b> Neeche wale kaam bina quota ke chalte hain.</p>
@@ -264,7 +287,6 @@ function EndCard() {
   );
 }
 
-/* ---------- REELS : keyless multi-source, cache-first, self-healing ---------- */
 export function ReelsScreen() {
   const noor = useNoor();
   const audio = useAudio();
@@ -275,19 +297,21 @@ export function ReelsScreen() {
   const [source, setSource] = useState(null);
   const [quotaDead, setQuotaDead] = useState(false);
   const [endReached, setEndReached] = useState(false);
+  const [igOpen, setIgOpen] = useState(false);
   const root = useRef(null);
   const qPtr = useRef(0); const busy = useRef(false); const loadN = useRef(0);
+  const seen = useRef(new Set()); const chan = useRef({});
   const tuneT = useRef(null);
+  useBackClose(igOpen, () => setIgOpen(false));
 
   const vis = (x) => !isHidden(x.id);
   const dedupe = (a) => { const s = new Set(), o = []; for (const x of a) if (x.id && !s.has(x.id)) { s.add(x.id); o.push(x); } return o; };
+  const seedSeen = (arr) => (arr || []).forEach((it) => { if (!it) return; seen.current.add(it.id); const c = it.ch || ""; chan.current[c] = (chan.current[c] || 0) + 1; });
+  const fresh = (arr) => { const out = []; for (const it of arr) { if (!it || seen.current.has(it.id)) continue; const c = it.ch || ""; if ((chan.current[c] || 0) >= 2) continue; seen.current.add(it.id); chan.current[c] = (chan.current[c] || 0) + 1; out.push(it); } return out; };
   const scopeKey = (kind, payload) => kind === "auto" ? "__auto__" : kind === "creator" ? "cr:" + payload : "q:" + payload;
 
-  // build a feed from at most 2 keyless searches (cached → instant + free on repeat)
   const buildList = useCallback(async (kind, payload) => {
-    const calls = kind === "search" ? [payload]
-      : kind === "creator" ? [payload + " shorts", payload]
-      : [buildTasteQuery(), QUERIES[0], QUERIES[1]];
+    const calls = kind === "search" ? [payload] : kind === "creator" ? [payload + " shorts", payload] : [buildTasteQuery(), QUERIES[0], QUERIES[1]];
     let all = [], src = "cache", made = 0;
     for (const q of calls) {
       if (!q || made >= 2) continue;
@@ -300,15 +324,18 @@ export function ReelsScreen() {
   const run = useCallback(async (kind, payload, force = false) => {
     if (!noor.live) return;
     const ck = scopeKey(kind, payload);
-    if (!force) { const c = getCachedItems(ck, FEED_TTL); if (c && c.length) { setFeed(c.filter(vis)); setSource("cache"); setLoading(false); setEndReached(false); return; } }
+    if (!force) {
+      const c = getCachedItems(ck, FEED_TTL);
+      if (c && c.length) { seedSeen(c); setFeed(c.filter(vis)); setSource("cache"); setLoading(false); setEndReached(false); return; }
+    }
     setLoading(true); setEndReached(false);
     try {
       const { items, source: src } = await buildList(kind, payload);
-      setFeed(items); setSource(src); cacheItems(ck, items); if (kind === "auto") persistFeed(items); setQuotaDead(false);
+      seedSeen(items); setFeed(items); setSource(src); cacheItems(ck, items); if (kind === "auto") persistFeed(items); setQuotaDead(false);
     } catch (e) {
       setQuotaDead(true);
       const stale = getCachedItems(ck, null) || (kind === "auto" ? getPersistedFeed() : null);
-      setFeed((stale || []).filter(vis)); setSource("cache");
+      seedSeen(stale); setFeed((stale || []).filter(vis)); setSource("cache");
     }
     setLoading(false);
   }, [noor, buildList]);
@@ -319,15 +346,21 @@ export function ReelsScreen() {
     if (!noor.live || busy.current) return;
     if (quotaDead) { setEndReached(true); return; }
     busy.current = true; setLoading(true);
-    const q = (loadN.current % 4 === 3) ? (buildTasteQuery() || QUERIES[qPtr.current % QUERIES.length]) : QUERIES[qPtr.current % QUERIES.length];
-    qPtr.current++; loadN.current++;
-    try {
-      const r = await searchVideos(noor.apiKey, q);
-      if (r.items.length) {
-        setFeed((f) => { const nf = dedupe(f.concat(r.items)).filter(vis); cacheItems(scopeKey(noor.command.kind, noor.command.payload), nf); if (noor.command.kind === "auto") persistFeed(nf); return nf; });
-        if (r.source !== "cache") setSource(r.source);
-      } else setEndReached(true);
-    } catch (e) { if (isQuota(e) || isAllDown(e)) setQuotaDead(true); setEndReached(true); }
+    let added = false, g = 0;
+    while (!added && g < QUERIES.length + 3) {
+      g++;
+      const q = (loadN.current % 4 === 3) ? (buildTasteQuery() || QUERIES[qPtr.current % QUERIES.length]) : QUERIES[qPtr.current % QUERIES.length];
+      qPtr.current++; loadN.current++;
+      try {
+        const r = await searchVideos(noor.apiKey, q);
+        const add = fresh(dedupe(r.items).filter(vis));
+        if (add.length) {
+          setFeed((f) => { const nf = dedupe(f.concat(add)); cacheItems(scopeKey(noor.command.kind, noor.command.payload), nf); if (noor.command.kind === "auto") persistFeed(nf); return nf; });
+          if (r.source !== "cache") setSource(r.source);
+          added = true;
+        }
+      } catch (e) { if (isQuota(e) || isAllDown(e)) setQuotaDead(true); setEndReached(true); break; }
+    }
     busy.current = false; setLoading(false);
   }, [noor, quotaDead]);
 
@@ -343,14 +376,14 @@ export function ReelsScreen() {
     noor.afterToggle(item, now);
     if (now && noor.live && !noor.creatorMode && !noor.searchActive && !quotaDead) {
       if (tuneT.current) clearTimeout(tuneT.current);
-      tuneT.current = setTimeout(async () => { const q = buildTasteQuery(); if (!q) return; try { const r = await searchVideos(noor.apiKey, q); if (r.items.length) setFeed((f) => dedupe(r.items.slice(0, 5).concat(f)).filter(vis)); } catch {} }, 1100);
+      tuneT.current = setTimeout(async () => { const q = buildTasteQuery(); if (!q) return; try { const r = await searchVideos(noor.apiKey, q); if (r.items.length) { const add = fresh(dedupe(r.items).filter(vis)); if (add.length) setFeed((f) => dedupe(add.concat(f))); } } catch {} }, 1100);
     }
   }, [noor, quotaDead]);
 
   const onDislike = useCallback((item) => { setFeed((f) => f.filter((x) => x.id !== item.id)); noor.dislike(item); }, [noor]);
   const onSkip = useCallback((i) => { const el = root.current && root.current.querySelector('.reel[data-i="' + (i + 1) + '"]'); el && el.scrollIntoView({ behavior: "smooth" }); }, []);
   const onSearch = (e) => { e.preventDefault(); const v = term.trim(); if (v) noor.playSearch(v); };
-  const reload = () => run(noor.command.kind, noor.command.payload, true);
+  const reload = () => { seen.current = new Set(); chan.current = {}; run(noor.command.kind, noor.command.payload, true); };
 
   if (!noor.live) return <Onboard />;
   const afArt = audio.track ? (isRecitation(audio.track.t + " " + audio.track.ch) ? "📖" : "🎵") : "🌧️";
@@ -362,7 +395,7 @@ export function ReelsScreen() {
         <form onSubmit={onSearch}><input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Search topic — patience, sabr, quran…" /></form>
       </div>
       {noor.creatorMode && <div className="cchip">📺 <b>{noor.creatorMode}</b><button className="x" onClick={() => { noor.playAuto(); noor.notify("Feed", "ok"); }}>{I.x}</button></div>}
-
+      <button className="ig-toggle" onClick={() => setIgOpen(true)} title="Instagram reels — bina API">📸</button>
       {feed.length > 0 && <SourcePill source={source} />}
 
       {(audio.track || audio.ambientActive) && (
@@ -376,7 +409,7 @@ export function ReelsScreen() {
 
       {feed.length > 0 ? (
         <div className="scroller" ref={root}>
-          {feed.map((it, i) => <Reel key={it.id} item={it} index={i} active={i === idx} mounted={Math.abs(i - idx) <= 1} muted={noor.reelMuted} onAfter={onAfter} onDislike={onDislike} onSkip={onSkip} />)}
+          {feed.map((it, i) => <Reel key={it.id} item={it} index={i} active={i === idx} mounted={noor.dataSaver ? i === idx : Math.abs(i - idx) <= 1} muted={noor.reelMuted} low={noor.dataSaver} onAfter={onAfter} onDislike={onDislike} onSkip={onSkip} />)}
           {endReached && <EndCard />}
           {loading && !endReached && <div className="reel" style={{ display: "grid", placeItems: "center" }}><div style={{ textAlign: "center", color: "#9fb0a0" }}><div style={{ width: 38, height: 38, border: "3px solid rgba(217,180,91,.25)", borderTopColor: "#d9b45b", borderRadius: "50%", margin: "0 auto 12px", animation: "spin 1s linear infinite" }} />Loading reminders…</div></div>}
         </div>
@@ -387,7 +420,31 @@ export function ReelsScreen() {
           <div className="reel" style={{ display: "grid", placeItems: "center" }}><div style={{ textAlign: "center", color: "#9fb0a0" }}><div style={{ width: 38, height: 38, border: "3px solid rgba(217,180,91,.25)", borderTopColor: "#d9b45b", borderRadius: "50%", margin: "0 auto 12px", animation: "spin 1s linear infinite" }} />Mirrors se reels laa raha hoon…</div></div>
         </div>
       )}
+
+      {igOpen && <InstagramOverlay onClose={() => setIgOpen(false)} />}
     </>
+  );
+}
+
+function InstagramOverlay({ onClose }) {
+  const noor = useNoor();
+  const list = useMemo(() => noor.collection.filter((x) => x.source === "instagram"), [noor.collection]);
+  return (
+    <div style={{ position: "absolute", inset: 0, zIndex: 45, background: "#04140f" }}>
+      {list.length === 0 ? (
+        <div className="ig-empty">
+          <button className="back-btn" onClick={onClose} aria-label="back">{I.back}</button>
+          <div>
+            <div className="ig-logo">📸</div>
+            <h3>Instagram reels — bina API ke</h3>
+            <p>Instagram ek <b>walled garden</b> hai: YouTube jaisa koi keyless mirror uska nahi, aur scraping = account ban + legal risk. Isliye <b>auto-discovery</b> possible nahi. Par jo reel ka <b>link</b> tu paste kare, woh official embed se yahan vertical feed mein chalti hai — keyless, legal, safe.</p>
+            <button className="btn btn-gold big" onClick={() => noor.setImportOpen(true)}>＋ Pehli IG reel add karo</button>
+          </div>
+        </div>
+      ) : (
+        <ReelScroller list={list} onClose={onClose} onAfter={(it, n) => noor.afterToggle(it, n)} />
+      )}
+    </div>
   );
 }
 
@@ -399,7 +456,7 @@ function Onboard() {
       <div className="ob-in">
         <div className="ob-ar">بِسْمِ اللَّهِ</div>
         <h2>Your infinite Islamic reel feed</h2>
-        <p>Scroll karo, pasand aaye toh <b>❤️</b>, nahi toh <b>👎</b>. Feed ab <b>keyless mirrors</b> se aati hai — quota ki tension nahi. Study pe <b>Quran + rain</b> background mein.</p>
+        <p>Scroll karo, pasand aaye toh <b>❤️</b>, nahi toh <b>👎</b>. Feed <b>keyless mirrors</b> se aati hai — quota ki tension nahi. Study pe <b>Quran + rain</b> background mein.</p>
         <button className="btn btn-gold big" onClick={() => noor.setConnectOpen(true)}>⚡ Connect YouTube (optional)</button>
         <div style={{ marginTop: 12 }}><button className="btn btn-ghost" onClick={() => noor.setImportOpen(true)}>＋ Reel import karo</button></div>
         <div className="ob-pills">{["📖 Quran", "🤲 Dua", "🕌 Seerah", "📜 Hadith", "🎵 Nasheed"].map((t, i) => <span key={t} className="ob-pill" style={{ animationDelay: i * 0.3 + "s" }}>{t}</span>)}</div>
@@ -420,7 +477,15 @@ export function StudyScreen() {
   const mm = String(Math.floor(left / 60)).padStart(2, "0"); const ss = String(left % 60).padStart(2, "0");
   const R = 86, C = 2 * Math.PI * R, off = C * (1 - left / total);
 
-  const playDraft = () => { const p = parseLink(draft); if (!p || p.source !== "youtube") { noor.notify("YouTube link paste karo (audio ke liye)", "err"); return; } audio.playTrack({ id: p.id, t: "Your track", ch: "YouTube", source: "youtube" }); setDraft(""); noor.notify("Background audio chal raha 🎧", "ok"); };
+  const playDraft = () => {
+    const p = parseLink(draft);
+    if (!p || p.source !== "youtube") { noor.notify("YouTube link paste karo (audio ke liye)", "err"); return; }
+    const item = { id: p.id, t: "Your track", ch: "YouTube", source: "youtube" };
+    audio.playTrack(item);
+    if (addToCollection(item)) { noor.syncCol(); noor.notify("Background audio chal raha + Saved ho gaya 🎧", "ok"); }
+    else noor.notify("Background audio chal raha 🎧", "ok");
+    setDraft("");
+  };
   const recOn = audio.track && isRecitation(audio.track.t + " " + audio.track.ch);
   const lecOn = audio.track && !recOn;
 
@@ -445,7 +510,7 @@ export function StudyScreen() {
 
         <div className="card">
           <h3>Background audio <span className="ar">خلفية</span></h3>
-          <p className="sub">Padhai ke dauran Quran recitation / lecture background mein — tab badalne pe bhi chalta rahega. Band karna ho toh neeche player ya reels pill pe <b>✕</b>. (Recitation bhi ab keyless mirror se aati hai — quota-free, 24h cache.)</p>
+          <p className="sub">Padhai ke dauran Quran / lecture background mein — tab badalne pe bhi chalta rahega, aur ab paste karte hi <b>Saved</b> bhi ho jaata hai. Band karna ho toh ✕.</p>
           <div className="preset-grid">
             <button className={"preset" + (recOn ? " on" : "")} onClick={audio.playRecitation}>
               {audio.playing && recOn && <span className="live-dot" />}
@@ -456,15 +521,15 @@ export function StudyScreen() {
               <span className="pem">🎙️</span><span className="pt">Lecture / Reminder</span><span className="ps">Mufti Menk · keyless</span>
             </button>
             <button className={"preset" + (paste ? " on" : "")} onClick={() => setPaste((p) => !p)} style={{ gridColumn: "1 / -1" }}>
-              <span className="pem">＋</span><span className="pt">Paste your own link</span><span className="ps">Koi bhi Quran / lecture YouTube link</span>
+              <span className="pem">＋</span><span className="pt">Paste your own link</span><span className="ps">Play + auto-save to Saved</span>
             </button>
           </div>
-          {paste && <div className="paste-mini"><input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="YouTube link paste karo…" onKeyDown={(e) => { if (e.key === "Enter") playDraft(); }} /><button onClick={playDraft} disabled={!draft.trim()}>Play</button></div>}
+          {paste && <div className="paste-mini"><input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="YouTube link paste karo…" onKeyDown={(e) => { if (e.key === "Enter") playDraft(); }} /><button onClick={playDraft} disabled={!draft.trim()}>Play + Save</button></div>}
         </div>
 
         <div className="card">
           <h3>Ambient mixer <span className="ar">سكون</span></h3>
-          <p className="sub">Yeh sounds browser mein bante hain — bina internet ke, bina copyright ke, bina quota ke. Rain + calm drone + soft chimes ko recitation ke saath mix karo.</p>
+          <p className="sub">Browser mein bante sounds — bina internet, bina copyright, bina quota. Rain + drone + chimes ko recitation ke saath mix karo.</p>
           <div className="mixer">
             <div className="mix-row"><div className="ic">🌧️</div><div className="meta"><b>Rain</b><small>soft brown-noise rain</small></div><input type="range" min="0" max="1" step="0.01" value={audio.ambient.rain} onChange={(e) => audio.setRain(parseFloat(e.target.value))} /></div>
             <div className="mix-row"><div className="ic">🎼</div><div className="meta"><b>Calm drone</b><small>warm focus pad</small></div><input type="range" min="0" max="1" step="0.01" value={audio.ambient.pad} onChange={(e) => audio.setPad(parseFloat(e.target.value))} /></div>
@@ -482,6 +547,7 @@ export function MeScreen() {
   const [seg, setSeg] = useState("saved");
   const [play, setPlay] = useState(null);
   const [cd, setCd] = useState("");
+  useBackClose(play !== null, () => setPlay(null));
   const sessions = parseInt(localStorage.getItem("noor_sessions") || "0", 10);
   const maxW = noor.tasteList[0] ? noor.tasteList[0].w : 1;
 
@@ -565,8 +631,9 @@ export function MeScreen() {
         <>
           <div className="set-row" onClick={() => noor.setConnectOpen(true)}><div><b>{noor.live ? "YouTube connected (optional)" : "Connect YouTube (optional)"}</b><small>{noor.live ? "Backup source on" : "Feed keyless mirrors se chalti hai; key sirf backup hai"}</small></div><span className="go">{I.bolt}</span></div>
           <div className="set-row" onClick={() => noor.setImportOpen(true)}><div><b>Reel import karo</b><small>Instagram / YouTube link paste</small></div><span className="go">{I.plus}</span></div>
+          <div className="set-row" onClick={noor.toggleDataSaver}><div><b>Data-Saver mode</b><small>{noor.dataSaver ? "ON — sirf active reel load hoti hai, low quality" : "OFF — neighbors preload hote hain"}</small></div><span className="go">{noor.dataSaver ? "🐢" : "⚡"}</span></div>
           <div className="set-row" onClick={() => { if (confirm("Saara taste clear karein?")) { localStorage.removeItem("noor_taste"); noor.forgetTaste("__noop__"); noor.notify("Taste clear", "ok"); } }}><div><b>Clear taste</b><small>Seekha hua bhula do</small></div><span className="go">{I.trash}</span></div>
-          <p style={{ color: "#7f8d7c", fontSize: ".72rem", lineHeight: 1.6, marginTop: 14, textAlign: "center" }}>NoorShorts · نور — crafted by Sakib<br />Phone pe "Add to Home Screen" karo → app jaisa khulega, background audio behtar chalega.</p>
+          <p style={{ color: "#7f8d7c", fontSize: ".72rem", lineHeight: 1.6, marginTop: 14, textAlign: "center" }}>NoorShorts · نور — crafted by Sakib<br />Phone pe "Add to Home Screen" karo → app jaisa khulega.</p>
         </>
       )}
 
@@ -585,7 +652,7 @@ export function TopBar() {
   const onSound = () => {
     const turningOn = noor.reelMuted;
     noor.toggleReelMuted();
-    if (turningOn && audio.track && audio.playing) noor.notify("Reel sound on 🔊 · mix ho toh pill / player pe ✕ se background band karo", "ok");
+    if (turningOn && audio.track && audio.playing) noor.notify("Reel sound on 🔊 · mix ho toh ✕ se background band karo", "ok");
     else if (turningOn) noor.notify("Reel sound on 🔊", "ok");
     else noor.notify("Reel sound mute 🔇", "ok");
   };
@@ -593,7 +660,8 @@ export function TopBar() {
     <div className="topbar">
       <div className="brand"><svg viewBox="0 0 24 24"><path d="M20.5 13.2A8.4 8.4 0 1 1 11 3.7a6.6 6.6 0 0 0 9.5 9.5z" fill="#d9b45b" /><path d="M16.8 5.2l.7 1.7 1.8.2-1.4 1.2.4 1.8-1.5-1-1.5 1 .4-1.8-1.4-1.2 1.8-.2z" fill="#e7cd86" /></svg><span>NoorShorts <em>نور</em></span></div>
       <div className="top-r">
-        <button className={"tbtn" + (noor.reelMuted ? "" : " on-sound")} onClick={onSound} title={noor.reelMuted ? "Reel sound off — tap to hear reels" : "Reel sound on — tap to mute reels"}>{noor.reelMuted ? I.volOff : I.volOn}</button>
+        <button className={"tbtn" + (noor.dataSaver ? " on-sound" : "")} onClick={noor.toggleDataSaver} title={noor.dataSaver ? "Data-saver ON" : "Data-saver OFF"}>{noor.dataSaver ? "🐢" : "⚡"}</button>
+        <button className={"tbtn" + (noor.reelMuted ? "" : " on-sound")} onClick={onSound} title={noor.reelMuted ? "Reel sound off" : "Reel sound on"}>{noor.reelMuted ? I.volOff : I.volOn}</button>
         <button className={"tbtn" + (noor.live ? " live" : "")} onClick={() => noor.setConnectOpen(true)} title={noor.live ? "Connected (backup)" : "Connect (optional)"}>{I.bolt}</button>
       </div>
     </div>
@@ -669,10 +737,10 @@ export function ConnectDrawer() {
   return (
     <aside className={"drawer" + (noor.connectOpen ? " open" : "")}>
       <h3>YouTube key <span className="ar">اختياري</span> <span style={{ fontSize: ".7rem", color: "#9fb0a0", fontFamily: "Manrope", fontWeight: 600 }}>(optional)</span></h3>
-      <p className="sub">Ab feed <b>keyless mirrors</b> (Piped / Invidious) se chalti hai — quota ki zaroorat nahi. Yeh key sirf <b>backup source</b> hai agar mirrors kabhi down hon. Na ho toh bhi app poora chalta hai.</p>
+      <p className="sub">Feed <b>keyless mirrors</b> (Piped / Invidious) se chalti hai — quota ki zaroorat nahi. Yeh key sirf <b>backup</b> hai agar mirrors down hon.</p>
       <label>YouTube API Key</label>
       <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="AIza…" readOnly={ENV} style={ENV ? { opacity: .75 } : undefined} />
-      {ENV ? <p className="env-note">✓ Key teri <b>.env</b> file se aa rahi hai (backup ke roop mein).</p>
+      {ENV ? <p className="env-note">✓ Key teri <b>.env</b> file se aa rahi hai (backup).</p>
         : <div className="steps">1. <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> → new project<br />2. Library → enable <b>YouTube Data API v3</b><br />3. Credentials → Create → <b>API Key</b> → paste. (Optional.)</div>}
       <div className="actions">
         {noor.live && !ENV && <button className="btn btn-ghost" onClick={noor.disconnect}>Remove key</button>}

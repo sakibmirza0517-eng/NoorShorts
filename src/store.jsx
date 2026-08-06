@@ -9,6 +9,16 @@ const KEY = "noor_yt_key", SEEN = "noor_onboarded";
 const NoorCtx = createContext(null);
 export const useNoor = () => useContext(NoorCtx);
 
+/* hardware/back button closes the topmost overlay instead of exiting the app */
+export function useBackClose(open, close) {
+  useEffect(() => {
+    if (!open) return;
+    const onPop = () => { history.pushState(null, ""); close(); };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [open, close]);
+}
+
 export function NoorProvider({ children }) {
   const [apiKey, setApiKey] = useState(() => ENV_KEY || localStorage.getItem(KEY) || "");
   const [live, setLive] = useState(false);
@@ -24,6 +34,7 @@ export function NoorProvider({ children }) {
   const [searchActive, setSearchActive] = useState(null);
   const [command, setCommand] = useState({ kind: "auto", payload: null, nonce: 0 });
   const [reelMuted, setReelMuted] = useState(() => { try { const v = localStorage.getItem("noor_reel_muted"); return v === null ? true : v === "1"; } catch { return true; } });
+  const [dataSaver, setDataSaver] = useState(() => { try { return localStorage.getItem("noor_datasaver") === "1"; } catch { return false; } });
 
   const notify = useCallback((m, k) => setToast({ m, k: k || "", id: Date.now() }), []);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); }, [toast]);
@@ -42,6 +53,9 @@ export function NoorProvider({ children }) {
 
   const toggleReelMuted = useCallback(() => {
     setReelMuted((m) => { const nv = !m; try { localStorage.setItem("noor_reel_muted", nv ? "1" : "0"); } catch {} return nv; });
+  }, []);
+  const toggleDataSaver = useCallback(() => {
+    setDataSaver((v) => { const nv = !v; try { localStorage.setItem("noor_datasaver", nv ? "1" : "0"); } catch {} return nv; });
   }, []);
 
   const saveKey = useCallback((k) => {
@@ -86,7 +100,8 @@ export function NoorProvider({ children }) {
   }, []);
 
   const value = {
-    apiKey, live, collection, tab, setTab, creatorMode, searchActive, command, reelMuted, toggleReelMuted,
+    apiKey, live, collection, tab, setTab, creatorMode, searchActive, command,
+    reelMuted, toggleReelMuted, dataSaver, toggleDataSaver,
     toast, importOpen, setImportOpen, connectOpen, setConnectOpen,
     orbit, tasteList, tasteCount, hidden, creators,
     notify, syncCol, afterToggle, dislike, saveKey, disconnect, doImport,
@@ -145,7 +160,6 @@ export function AudioProvider({ children }) {
   const setChimes = useCallback((v) => { setAmbient((a) => ({ ...a, chimes: v })); engine.current.setChimes(v); }, []);
   const chime = useCallback(() => engine.current && engine.current.chime(), []);
 
-  // STOP EVERYTHING — the cross button the user asked for
   const stopAll = useCallback(() => {
     try { player.current && player.current.stopVideo && player.current.stopVideo(); } catch {}
     setTrack(null); setPlaying(false);
